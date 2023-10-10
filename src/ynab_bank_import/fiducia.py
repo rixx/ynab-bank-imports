@@ -18,76 +18,27 @@ class Dialect(csv.Dialect):
 def import_account(filename, ynab):
     ## Skipping first lines with unneeded information
     with open(filename, newline='', encoding='ISO-8859-15') as f:
-        bank_file = f.readlines()[12:]
+        bank_file = f.readlines()
 
     for record in csv.DictReader(bank_file, dialect=Dialect):
         # Skipping last lines "Anfangssaldo" and "Endsaldo"
-        if (record['Kundenreferenz'] == "Anfangssaldo" or record['Kundenreferenz'] == "Endsaldo" or record['Währung'] is None):
+        if (record['Buchungstext'] == "Anfangssaldo" or record['Buchungstext'] == "Endsaldo"):
             continue
 
         t = ynab.new_transaction()
         t.Date = record['Buchungstag']
-        t.Payee = record['Empfänger/Zahlungspflichtiger']
+        t.Payee = record['Name Zahlungsbeteiligter']
 
-        type_, subject = record['Vorgang/Verwendungszweck'].split('\n', maxsplit=1)
-        subject = subject.replace('\n', '')
+        subject = record['Verwendungszweck']
+        subject = subject.replace('\n', '').strip()
 
-        identifier = ''
-        if type_ == 'EURO-Ueberw. SEPA':
-            subject = subject.replace(': ', ':')
-            try:
-                subject = subject.replace('BIC:', ' BIC:')
-            except ValueError:
-                pass
-            try:
-                subject = subject.replace('IBAN:', ' IBAN:')
-            except ValueError:
-                pass
-            subject = subject.replace('  ', ' ')
-
-            try:
-                split = subject.index('TAN:')
-                subject, meta = subject[:split].strip(), subject[split:].strip()
-                tan, iban, bic = meta.split(' ')
-            except ValueError:
-                tan = ''
-
-            identifier = tan
-        elif type_ == 'Dauerauftrag':
-            split = subject.index('/*') # marker for which dauerauftrag
-            subject, identifier = subject[:split].strip(), subject[split:].strip()
-            identifier = identifier.split('*', maxsplit=1)[0]
-        elif type_ == 'Überweisungsgutschr.':
-            try:
-                split = subject.index('IBAN:')
-                subject = subject[:split].strip()
-            except ValueError:
-                pass
-        elif type_ == 'Lastschrift':
-            subject = subject.replace(': ', ':')
-            subject = subject.replace('  ', ' ')
-            try:
-                split = subject.index('EREF:')
-                subject, meta = subject[:split].strip(), subject[split:].strip()
-                eref, mref, cred, iban = meta.split(' ')
-            except ValueError:
-                tan = ''
-            pass
-        elif type_ == 'Abschluss':
-            pass
-        elif type_ == 'Scheckeinreichung Ev':
-            subject, identifier = '', ''
-        else:
-            raise ValueError(f"Unknown transaction type `{type_}`")
-
-        t.Memo = (subject + ' ' + identifier).strip()
-
+        t.Memo = subject
         amount = decimal.Decimal(
-            record['Umsatz'].replace('.', '').replace(',', '.'))
+            record['Betrag'].replace('.', '').replace(',', '.'))
 
         # Last column indicates positive / negative amount
-        if record[' '] == 'S':
-            t.Outflow = amount
+        if amount < 0:
+            t.Outflow = abs(amount)
         else:
             t.Inflow = amount
 
